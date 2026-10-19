@@ -1,0 +1,23 @@
+<svg width="200" height="600" viewBox="0 0 200 600" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Clean Strip Background -->
+  <rect width="200" height="600" rx="16" fill="#FFFFFF"/>
+  <rect x="1" y="1" width="198" height="598" rx="15" stroke="#E5E7EB" stroke-width="2"/>
+  
+  <!-- 3 Clean Photo Rows -->
+  <rect x="16" y="30" width="168" height="145" rx="8" fill="#F3F4F6" stroke="#D1D5DB" stroke-width="1.5"/>
+  <rect x="16" y="195" width="168" height="145" rx="8" fill="#F3F4F6" stroke="#D1D5DB" stroke-width="1.5"/>
+  <rect x="16" y="360" width="168" height="145" rx="8" fill="#F3F4F6" stroke="#D1D5DB" stroke-width="1.5"/>
+  
+  <!-- Subtle minimal indicators inside slots -->
+  <circle cx="100" cy="102" r="14" fill="#E5E7EB"/>
+  <path d="M93 108L97 101L101 106L104 103L107 108H93Z" fill="#9CA3AF"/>
+  
+  <circle cx="100" cy="267" r="14" fill="#E5E7EB"/>
+  <path d="M93 273L97 266L101 271L104 268L107 273H93Z" fill="#9CA3AF"/>
+
+  <circle cx="100" cy="432" r="14" fill="#E5E7EB"/>
+  <path d="M93 438L97 431L101 436L104 433L107 438H93Z" fill="#9CA3AF"/>
+
+  <!-- Minimalist bottom label -->
+  <text x="100" y="555" text-anchor="middle" font-family="sans-serif" font-size="11" font-weight="600" fill="#9CA3AF" letter-spacing="3">POLOSAN</text>
+</svg>
