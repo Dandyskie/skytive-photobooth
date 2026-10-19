@@ -133,3 +133,39 @@ Validasi Kode
 npm run lint → 0 Errors & 0 Warnings
 npx tsc --noEmit → 0 Type Errors
 Karena dev server Anda sudah berjalan di terminal, perubahannya otomatis ter-reload via Hot Module Replacement (HMR).
+
+---
+
+## 3. Masalah Gambar Gagal Ter-render Saat Pelanggan Scan QR Code
+
+### Penyebab Utama:
+1. **Isolasi Memori Antar-Worker Thread Next.js**:
+   - Saat laptop photobooth mengirim `POST /api/photos`, request ditangani oleh **Worker Thread A** dan disimpan ke `globalThis._photosStoreMap`.
+   - Saat HP pelanggan scan QR dan mengirim `GET /api/photos/[id]`, request ditangani oleh **Worker Thread B** (atau setelah recompilation Turbopack).
+   - Dalam Node.js/Turbopack, setiap worker thread memiliki V8 isolate dan `globalThis` yang terpisah. Akibatnya, `getPhotoFromMemory(id)` di Worker B mengembalikan `null`, endpoint merespons HTTP **404 Not Found**, dan gambar di HP gagal tampil ("Foto Belum Ditemukan").
+2. **Jebakan Hostname `localhost` pada QR Code**:
+   - Jika laptop photobooth dibuka melalui `http://localhost:3000`, `window.location.origin` bernilai `http://localhost:3000`.
+   - QR code sebelumnya meng-encode URL `localhost:3000/p/[id]`. Saat di-scan dengan HP, HP mencoba membuka `localhost` di perangkat HP itu sendiri (loopback 127.0.0.1) sehingga koneksi ditolak (ERR_CONNECTION_REFUSED).
+3. **Tidak Ada Loading State & Retry di Halaman Download**:
+   - Komponen `<img src="/api/photos/[id]" />` sebelumnya langsung memicu `onError` tanpa jeda atau percobaan ulang (retry). Jika ada jeda penulisan data atau kompilasi awal route handler, halaman langsung divonis gagal permanen.
+4. **Header Binary Stream Belum Lengkap**:
+   - Endpoint `GET /api/photos/[id]` sebelumnya mengembalikan `new NextResponse(new Uint8Array(buffer))` tanpa `Content-Length`. Browser mobile (Safari/Chrome mobile) membutuhkan `Content-Length` untuk mengalokasikan buffer decoding gambar secara presisi.
+
+### Solusi & Perbaikan yang Diterapkan:
+1. **Penyimpanan Hibrida (Hybrid In-Memory + Disk Cache)** di `src/lib/photoStorage.ts`:
+   - Foto kini disimpan secara ganda: di RAM (`Map`) untuk kecepatan instan, dan di cache folder `.photos-cache/[id].png` + `.photos-cache/[id].json`.
+   - Seluruh worker thread Next.js, reload dev server, dan request dari perangkat luar (HP) kini dapat membaca file cache secara 100% konsisten.
+   - Dilengkapi auto-cleanup otomatis: file dengan usia lebih dari 30 menit (TTL) dan kapasitas antrean di atas 50 item otomatis dihapus dari harddisk.
+   - Folder `/.photos-cache` telah didaftarkan ke `.gitignore`.
+2. **Deteksi Otomatis IP LAN Lokal** di `src/app/api/network-ip/route.ts` & `DownloadView.tsx`:
+   - Ditambahkan endpoint `GET /api/network-ip` yang membaca alamat IPv4 Wi-Fi/LAN lokal (misal `192.168.1.80`).
+   - Di `DownloadView.tsx`, jika photobooth dibuka di laptop via `localhost` atau `127.0.0.1`, QR code otomatis menggunakan IP LAN (`http://192.168.1.80:3000/p/[id]`). Seluruh smartphone di jaringan Wi-Fi yang sama dapat langsung memindai dan membuka halaman tanpa kendala.
+   - Jika dideploy ke domain publik (misal Vercel / domain sendiri), URL publik tetap digunakan secara otomatis.
+3. **Sinkronisasi Asinkron dengan Auto-Retry & Skeleton Loader** di `src/app/p/[id]/page.tsx`:
+   - Dilengkapi mekanisme pengambilan foto otomatis dengan retry eksponensial (hingga 3 kali percobaan) untuk mengatasi latency jaringan atau race condition.
+   - Menampilkan animasi loading skeleton editorial kontemporer ("Menyinkronkan Foto Digital...") saat data sedang diambil.
+   - Response binary dikonversi menjadi Blob URL (`URL.createObjectURL(blob)`) untuk render instan di browser HP dan unduhan PNG langsung tanpa perantara server.
+4. **Optimasi Streaming Binary Gambar** di `src/app/api/photos/[id]/route.ts`:
+   - Mengalirkan buffer biner gambar langsung menggunakan Web API `Response(Uint8Array)` dengan header `Content-Type`, `Content-Length`, `Content-Disposition`, dan `Cache-Control`.
+5. **Retry Upload di Sisi Editor** di `src/features/editor/PhotoEditor.tsx`:
+   - Menambahkan auto-retry saat mengunggah hasil ekspor foto ke server agar tidak ada sesi foto yang terlewat.

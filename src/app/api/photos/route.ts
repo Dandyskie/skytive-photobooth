@@ -20,7 +20,7 @@ export const revalidate = 0;
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { dataUrl, id: customId } = body;
+    const { dataUrl } = body;
 
     // Validasi input data
     if (!dataUrl || typeof dataUrl !== "string") {
@@ -30,12 +30,12 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Gunakan ID dari klien (agar sinkron dengan LocalStorage laptop) atau buat ID unik baru
+    const rawId = body.id || body.customId;
     const timestamp = Date.now().toString(36);
     const randomSuffix = Math.random().toString(36).substring(2, 7);
-    const id = customId || `mk-${timestamp}-${randomSuffix}`;
+    const id = (rawId || `sky-${timestamp}-${randomSuffix}`).replace(/[^a-zA-Z0-9_-]/g, "");
 
-    // 1. Simpan foto ke memori RAM server (Bukan ke harddisk laptop!)
+    // 1. Simpan foto ke penyimpanan (RAM + Disk Cache)
     savePhotoToMemory(id, dataUrl);
 
     // 2. Opsi sinkronisasi cloud RAM (Jika Upstash Redis terpasang di environment Vercel)
@@ -63,7 +63,7 @@ export async function POST(req: NextRequest) {
       id,
       downloadUrl: `/p/${id}`,
       imageUrl: `/api/photos/${id}`,
-      message: "Foto berhasil disimpan sementara di RAM (aktif 30 menit)",
+      message: "Foto berhasil disimpan (aktif 30 menit)",
     });
   } catch (error) {
     console.error("Gagal memproses simpan foto:", error);

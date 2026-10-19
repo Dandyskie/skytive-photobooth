@@ -14,47 +14,138 @@
  * ============================================================================
  */
 
-import React, { use, useState } from "react";
+import React, { use, useState, useEffect, useRef, useCallback } from "react";
 import Link from "next/link";
-import { Download, Share2, Camera, Check, RefreshCw } from "lucide-react";
+import { Download, Share2, Camera, Check, RefreshCw, Loader2 } from "lucide-react";
 import { Button } from "@/components/Button";
 
 interface CustomerDownloadPageProps {
   params: Promise<{ id: string }>;
 }
 
-const getInitialPhotoSrc = (photoId: string): string => {
+const getLocalPhoto = (cleanId: string): string | null => {
   if (typeof window !== "undefined") {
     try {
       const localData =
-        localStorage.getItem(`sky_photo_${photoId}`) ||
+        localStorage.getItem(`sky_photo_${cleanId}`) ||
         localStorage.getItem("sky_latest_strip") ||
-        localStorage.getItem(`mk_photo_${photoId}`) ||
+        localStorage.getItem(`mk_photo_${cleanId}`) ||
         localStorage.getItem("mk_latest_strip");
       if (localData && localData.startsWith("data:image")) {
         return localData;
       }
-    } catch {
-      // LocalStorage error ignore
-    }
+    } catch {}
   }
-  return `/api/photos/${photoId}`;
+  return null;
 };
 
 export default function CustomerDownloadPage({ params }: CustomerDownloadPageProps) {
   const { id } = use(params);
-  const [photoSrc, setPhotoSrc] = useState<string>(() => getInitialPhotoSrc(id));
+  const cleanId = decodeURIComponent(id).replace(/[^a-zA-Z0-9_-]/g, "");
+
+  const [initialLocal] = useState<string | null>(() => getLocalPhoto(cleanId));
+  const [photoSrc, setPhotoSrc] = useState<string>(() => initialLocal || "");
+  const [isLoading, setIsLoading] = useState<boolean>(() => !initialLocal);
   const [isFailed, setIsFailed] = useState<boolean>(false);
   const [copied, setCopied] = useState<boolean>(false);
   const [isDownloading, setIsDownloading] = useState<boolean>(false);
+  const blobUrlRef = useRef<string | null>(null);
+
+  const syncPhotoFromServer = useCallback(async (maxRetries = 3, initialDelay = 800) => {
+    setIsLoading(true);
+    setIsFailed(false);
+
+    let currentDelay = initialDelay;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        const res = await fetch(`/api/photos/${cleanId}?t=${Date.now()}`);
+
+        if (res.ok) {
+          const blob = await res.blob();
+          if (blobUrlRef.current) {
+            URL.revokeObjectURL(blobUrlRef.current);
+          }
+          const newUrl = URL.createObjectURL(blob);
+          blobUrlRef.current = newUrl;
+          setPhotoSrc(newUrl);
+          setIsLoading(false);
+          setIsFailed(false);
+          return;
+        }
+      } catch {
+        // Abaikan error jaringan sementara untuk di-retry
+      }
+
+      if (attempt < maxRetries) {
+        await new Promise((resolve) => setTimeout(resolve, currentDelay));
+        currentDelay = Math.round(currentDelay * 1.5);
+      }
+    }
+
+    setIsLoading(false);
+    setIsFailed(true);
+  }, [cleanId]);
+
+  useEffect(() => {
+    if (initialLocal) return;
+
+    let isMounted = true;
+
+    const runFetch = async () => {
+      let currentDelay = 800;
+      for (let attempt = 0; attempt <= 3; attempt++) {
+        try {
+          const res = await fetch(`/api/photos/${cleanId}?t=${Date.now()}`);
+          if (!isMounted) return;
+
+          if (res.ok) {
+            const blob = await res.blob();
+            if (!isMounted) return;
+
+            if (blobUrlRef.current) {
+              URL.revokeObjectURL(blobUrlRef.current);
+            }
+            const newUrl = URL.createObjectURL(blob);
+            blobUrlRef.current = newUrl;
+            setPhotoSrc(newUrl);
+            setIsLoading(false);
+            setIsFailed(false);
+            return;
+          }
+        } catch {
+          // ignore
+        }
+
+        if (attempt < 3) {
+          await new Promise((resolve) => setTimeout(resolve, currentDelay));
+          currentDelay = Math.round(currentDelay * 1.5);
+        }
+      }
+
+      if (isMounted) {
+        setIsLoading(false);
+        setIsFailed(true);
+      }
+    };
+
+    runFetch();
+
+    return () => {
+      isMounted = false;
+      if (blobUrlRef.current) {
+        URL.revokeObjectURL(blobUrlRef.current);
+      }
+    };
+  }, [cleanId, initialLocal]);
 
   const handleDownload = async () => {
+    if (!photoSrc) return;
     setIsDownloading(true);
     try {
-      if (photoSrc.startsWith("data:image")) {
+      if (photoSrc.startsWith("data:image") || photoSrc.startsWith("blob:")) {
         const link = document.createElement("a");
         link.href = photoSrc;
-        link.download = `SKYTIVE-PHOTOBOOTH-${id}.png`;
+        link.download = `SKYTIVE-PHOTOBOOTH-${cleanId}.png`;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
@@ -66,7 +157,7 @@ export default function CustomerDownloadPage({ params }: CustomerDownloadPagePro
       const blobUrl = window.URL.createObjectURL(blob);
       const link = document.createElement("a");
       link.href = blobUrl;
-      link.download = `SKYTIVE-PHOTOBOOTH-${id}.png`;
+      link.download = `SKYTIVE-PHOTOBOOTH-${cleanId}.png`;
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
@@ -115,28 +206,26 @@ export default function CustomerDownloadPage({ params }: CustomerDownloadPagePro
 
       {/* Photo Preview Container */}
       <div className="editorial-card w-full max-w-[280px] sm:max-w-[300px] p-3 rounded-2xl mb-5 flex flex-col items-center">
-        <div className="relative w-full max-h-[60vh] rounded-xl overflow-hidden bg-[#ECEAE4] border border-[#191919]/10 flex items-center justify-center p-1">
-          {!isFailed ? (
+        <div className="relative w-full min-h-[260px] max-h-[60vh] rounded-xl overflow-hidden bg-[#ECEAE4] border border-[#191919]/10 flex items-center justify-center p-1">
+          {isLoading ? (
+            <div className="w-full h-56 flex flex-col items-center justify-center p-4 text-center text-[#595856] font-body text-xs gap-3">
+              <Loader2 className="w-6 h-6 text-[#191919] animate-spin" />
+              <div className="flex flex-col gap-0.5">
+                <span className="font-heading font-bold text-xs text-[#191919]">
+                  Menyinkronkan Foto Digital...
+                </span>
+                <span className="text-[11px] font-mono text-[#737373]">
+                  Mengambil soft-file resolusi tinggi dari booth
+                </span>
+              </div>
+            </div>
+          ) : !isFailed && photoSrc ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img
               src={photoSrc}
               alt="Hasil Foto Skytive Photobooth"
-              className="max-h-[55vh] w-auto max-w-full object-contain rounded-lg"
+              className="max-h-[55vh] w-auto max-w-full object-contain rounded-lg shadow-xs"
               onError={() => {
-                // Fallback to localStorage if API call failed
-                try {
-                  const fallback =
-                    localStorage.getItem(`sky_photo_${id}`) ||
-                    localStorage.getItem("sky_latest_strip") ||
-                    localStorage.getItem(`mk_photo_${id}`) ||
-                    localStorage.getItem("mk_latest_strip");
-                  if (fallback && fallback !== photoSrc) {
-                    setPhotoSrc(fallback);
-                    return;
-                  }
-                } catch {
-                  // Fallback failed
-                }
                 setIsFailed(true);
               }}
             />
@@ -144,25 +233,22 @@ export default function CustomerDownloadPage({ params }: CustomerDownloadPagePro
             <div className="w-full h-48 flex flex-col items-center justify-center p-4 text-center text-[#B83A24] font-body text-xs gap-2">
               <span className="font-heading font-bold text-sm">Foto Belum Ditemukan</span>
               <p className="text-xs text-[#595856] max-w-[200px]">
-                Sedang memproses sinkronisasi atau sesi telah berakhir.
+                Sedang memproses sinkronisasi atau sesi foto telah berakhir.
               </p>
               <Button
                 size="sm"
                 variant="secondary"
-                onClick={() => {
-                  setIsFailed(false);
-                  setPhotoSrc(`/api/photos/${id}?t=${Date.now()}`);
-                }}
+                onClick={() => syncPhotoFromServer(3, 500)}
                 className="mt-2 text-xs py-1.5 px-3"
               >
                 <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
-                <span>Coba Sinkronkan</span>
+                <span>Coba Sinkronkan Ulang</span>
               </Button>
             </div>
           )}
         </div>
         <p className="text-[10px] font-mono text-[#737373] mt-2.5 text-center">
-          ID: {id} • FORMAT HIGH-RES PNG
+          ID: {cleanId} • FORMAT HIGH-RES PNG
         </p>
       </div>
 

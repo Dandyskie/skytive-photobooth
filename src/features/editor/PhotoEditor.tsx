@@ -96,13 +96,23 @@ export const PhotoEditor: React.FC = () => {
         console.warn("Penyimpanan LocalStorage lokal:", lsErr);
       }
 
-      // 4. Kirim ke API endpoint photos
+      // 4. Kirim ke API endpoint photos (dengan retry jika kendala sementara)
       try {
-        const res = await fetch("/api/photos", {
+        let res = await fetch("/api/photos", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ id: photoId, dataUrl, frameId: selectedFrame.id }),
         });
+
+        if (!res.ok) {
+          // Retry sekali
+          res = await fetch("/api/photos", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ id: photoId, dataUrl, frameId: selectedFrame.id }),
+          });
+        }
+
         if (res.ok) {
           const data = await res.json();
           if (data.id) {
@@ -112,9 +122,11 @@ export const PhotoEditor: React.FC = () => {
               localStorage.setItem("sky_latest_id", photoId);
             } catch {}
           }
+        } else {
+          console.error("Gagal menyimpan foto strip di server:", res.status, res.statusText);
         }
       } catch (uploadErr) {
-        console.warn("Gagal mengirim ke RAM server, menggunakan ID lokal:", uploadErr);
+        console.warn("Gagal mengirim ke server, menggunakan ID lokal:", uploadErr);
       }
 
       // 5. Simpan ke Zustand dan lanjut ke tampilan QR Code

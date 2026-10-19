@@ -29,11 +29,34 @@ export const DownloadView: React.FC = () => {
 
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string>("");
   const [copied, setCopied] = useState<boolean>(false);
+  const [networkOrigin, setNetworkOrigin] = useState<string>("");
 
-  const shareUrl =
-    typeof window !== "undefined"
-      ? `${window.location.origin}/p/${photoShareId || "sample"}`
-      : `/p/${photoShareId || "sample"}`;
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const hostname = window.location.hostname;
+    // Jika dibuka di browser laptop/booth via localhost/127.0.0.1,
+    // ambil IP LAN lokal (misal http://192.168.1.80:3000) agar kamera HP bisa langsung membukanya di jaringan Wi-Fi lokal
+    if (hostname === "localhost" || hostname === "127.0.0.1") {
+      fetch("/api/network-ip")
+        .then((res) => res.json())
+        .then((data) => {
+          if (data.lanIp) {
+            const port = window.location.port ? `:${window.location.port}` : "";
+            setNetworkOrigin(`http://${data.lanIp}${port}`);
+          }
+        })
+        .catch(() => {});
+    }
+  }, []);
+
+  const effectiveOrigin =
+    networkOrigin ||
+    (typeof window !== "undefined" ? window.location.origin : "");
+
+  const shareUrl = effectiveOrigin
+    ? `${effectiveOrigin}/p/${photoShareId || "sample"}`
+    : `/p/${photoShareId || "sample"}`;
 
   useEffect(() => {
     if (!shareUrl) return;
